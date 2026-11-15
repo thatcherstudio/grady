@@ -227,6 +227,11 @@ grady judge-check [judge-check/labeled.jsonl] --models FILE --judge LABEL
 - `tokens_per_s` is `completion_tokens / latency_s`. It is **end-to-end throughput**, prompt
   processing included, not pure decode speed. It is null when the server reports no `usage`.
   Streaming and time-to-first-token are out of scope for v1.
+- Both numbers include time a request spends **queued on the server** when `--concurrency`
+  exceeds what the server runs in parallel, and the first requests include **model load time**
+  on a cold local server. For answers of a few tokens, `tokens_per_s` says little. The first
+  real M1 run showed this: gemma3:4b on Ollama measured 1.1 cases/s cold and 2.9 cases/s warm,
+  with tok/s between 0.4 and 11. Reports (M3) must label these as end-to-end figures.
 
 ---
 
