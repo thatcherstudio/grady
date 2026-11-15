@@ -210,6 +210,7 @@ def test_balance_warning_only_for_a_finished_lopsided_set() -> None:
 
 def test_normalize_key() -> None:
     assert normalize_key("\x1b[C") == "\x1b[C"
+    assert normalize_key("\x1b[C\x1b[C") == "\x1b[C"  # a fast double press grades one card
     assert normalize_key("P") == "p"
     assert normalize_key("pf") == "p"  # buffered keys can't grade an unseen card
     assert normalize_key("") == ""
@@ -243,6 +244,7 @@ def test_cli_grades_every_card_blind(tmp_path: Path) -> None:
 
     assert code == 0, output
     assert "Rubric for a" in output and "answer c2" in output  # the cards were drawn...
+    assert "Card 1 of 6" in output and "0 saved" in output
     assert SECRET not in output and "other-model" not in output  # ...without the source
     assert "Done. 6/6 labeled: 4 pass, 2 fail, 1 unsure." in output
     labels = read_labels(out)

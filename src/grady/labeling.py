@@ -233,9 +233,9 @@ def load_session(candidates_path: Path, labels_path: Path, rng: random.Random) -
 
 
 def normalize_key(raw: str) -> str:
-    """Arrow keys arrive as escape sequences and stay whole. Otherwise only the first key
-    counts, so keys typed while a card was drawing can't grade a card you haven't seen."""
-    return raw if raw.startswith("\x1b") else raw[:1].lower()
+    """Only the first key in a read counts, so keys typed while a card was drawing can't grade
+    a card you haven't seen. An arrow key is one 3-character escape sequence."""
+    return raw[:3] if raw.startswith("\x1b") else raw[:1].lower()
 
 
 def grade(
@@ -286,8 +286,9 @@ def render_card(session: LabelSession, candidate: Candidate, status: str) -> Ren
     total = len(session.candidates)
     header = Table.grid(padding=(0, 2))
     header.add_row(
-        Text(f"{done + 1}/{total}", style="bold"),
+        Text(f"Card {done + 1} of {total}", style="bold"),
         ProgressBar(total=total, completed=done, width=30),
+        Text(f"{done} saved", style="dim"),
         Text(candidate.id, style="dim"),
     )
 
