@@ -21,3 +21,6 @@ results/
 
 # OS
 .DS_Store
+
+# Left behind only if grady label is killed mid-save
+*.jsonl.tmp

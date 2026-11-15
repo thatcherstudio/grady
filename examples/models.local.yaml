@@ -6,6 +6,11 @@ models:
     base_url: http://localhost:11434/v1
     model: gemma3:4b
 
+  # A smaller model, used with the 4B one to build the judge-check set: `ollama pull gemma3:1b`.
+  - label: ollama-gemma3-1b
+    base_url: http://localhost:11434/v1
+    model: gemma3:1b
+
   # vLLM: `vllm serve <hf-model-id>`; set `model` to that id.
   - label: vllm-local
     base_url: http://localhost:8000/v1

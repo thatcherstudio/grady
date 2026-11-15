@@ -89,3 +89,36 @@ against gemma3:4b on a local Ollama: 8/8 pass warm, exit codes 1 and 3 reproduce
 - API keys are redacted from error text even when a server echoes them back.
 - Typer 0.29 vendors Click, so there is no separate Click dependency. mypy uses the Pydantic
   plugin so field defaults type-check.
+
+---
+
+## 2026-11-15: Judge-check set and `grady label` (pre-M2)
+
+**Agent did:** Claude Code (Opus 5.5) wrote `grady label`, a one-key-per-card terminal grader
+(`labeling.py`); `python -m grady.judgeset`, which answers each rubric prompt with several
+models; 15 rubric prompts in `judge-check/cases.yaml`; and 36 tests. It generated
+`judge-check/candidates.jsonl`: 30 answers, one per prompt from `gemma3:4b` and one from
+`gemma3:1b`, at temperature 0.7 with no system prompt. The agent did not read or grade the
+answers; it checked only counts (30 rows, 15 prompts, none empty). It also drove the real
+command through a pseudo-terminal with arrow-key bytes and Ctrl-C to check the raw-key path.
+
+**Review caught:** _(maintainer to fill in)_
+
+**Changed by hand:** _(maintainer to fill in)_
+
+**Decisions:**
+- **Moved before M2.** The labels have to exist before the judge prompt is written, or the
+  prompt gets tuned toward the answers it already agrees with.
+- **Two models of different strength** instead of one, so the set has fails as well as
+  passes. A finished set that is less than 25% pass or less than 25% fail gets a warning.
+- **Blind, spread apart, no skip.** The card never shows the source model, and ids are
+  numbered in a shuffled order. Two answers to the same prompt are never adjacent, so neither
+  is graded against the other. Unsure answers get flagged instead of skipped, because skipping
+  them would inflate agreement.
+- **Pass/fail labels, not 1–5,** to match what the scorer decides. Faster and more consistent
+  for a human.
+- **Labels are pinned to answers.** Regenerating the candidates makes any label that now points
+  at a different answer a load error.
+- **Terminal tool, not a web page.** SPEC rules out a web UI, and this keeps the tool in the
+  repo with tests. Saves go through a temp file and a rename on every key, so a crash or
+  Ctrl-C can't lose or truncate labels.

@@ -1,0 +1,109 @@
+# Rubric prompts for the judge-check set. Each is answered by two or more models of different
+# strength (`python -m grady.judgeset`), the answers are graded by hand (`grady label`), and
+# M4's `grady judge-check` measures how often the LLM judge agrees with those labels.
+#
+# Each rubric has several checkable parts (length, format, content, no invented facts), so a
+# weaker model fails some of them and the set ends up with both passes and fails. There is no
+# system prompt: the answers show each model's habits, preambles included.
+temperature: 0.7
+max_tokens: 256
+cases:
+  - id: polite-reminder
+    prompt: "Rewrite this as a polite reminder: 'Pay your bill.'"
+    rubric: "Polite, one or two sentences, and the request to pay stays clear."
+
+  - id: decline-invite
+    prompt: "Write a short reply declining an invitation to a Saturday team picnic. Keep it friendly."
+    rubric: "Clearly declines, stays friendly, and is three sentences or fewer."
+
+  - id: one-sentence-summary
+    prompt: |
+      Summarize in one sentence:
+      "Starting next week, the city library will stay open until 10 p.m. on weekdays during the
+      exam period. Weekend hours are unchanged. The extra hours end on June 20."
+    rubric: >-
+      Exactly one sentence. Says the library is open later (until 10 p.m.) on weekdays during
+      exams. Adds no facts that are not in the text.
+
+  - id: sky-for-kids
+    prompt: "Explain why the sky is blue to a 7-year-old, in under 60 words."
+    rubric: >-
+      Accurate (sunlight is made of colors and air scatters blue light the most), uses words a
+      7-year-old knows, and is under 60 words.
+
+  - id: subject-line
+    prompt: >-
+      Write an email subject line telling the team the office is closed on Monday for
+      repairs.
+    rubric: "One subject line only, under 10 words, says the office is closed and when."
+
+  - id: plant-tips
+    prompt: "Give three tips for keeping a houseplant alive. Numbered list, no introduction or conclusion."
+    rubric: "Exactly three numbered tips, each practical, with no intro or closing sentence."
+
+  - id: fix-grammar
+    prompt: >-
+      Fix the grammar and spelling and change nothing else: "Their going too the store tomorow,
+      and they needs milk."
+    rubric: >-
+      Fixes all four errors (They're, to, tomorrow, need), keeps every other word, and returns
+      only the corrected sentence.
+
+  - id: casual-rewrite
+    prompt: >-
+      Rewrite in a casual, friendly tone: "We regret to inform you that your request cannot be
+      accommodated at this time."
+    rubric: >-
+      Casual and friendly, still says the request can't be done right now, and is one or two
+      sentences.
+
+  - id: unknown-fact
+    prompt: "How many people attended the first Larkspur Valley Kite Festival in 1923?"
+    rubric: >-
+      Says it doesn't know or can't find this. Does not invent a number, a source or event
+      details.
+
+  - id: bottle-description
+    prompt: >-
+      Write a two-sentence product description for a reusable water bottle that keeps drinks
+      cold for 24 hours.
+    rubric: >-
+      Exactly two sentences, mentions keeping drinks cold for 24 hours, and invents no specific
+      features (sizes, materials, prices, certifications).
+
+  - id: action-items
+    prompt: |
+      List the action items from these notes, each with its owner:
+      "Priya will send the budget draft by Friday. We agreed the launch moves to May. Tom is
+      booking the venue. Someone should update the website, and Lee offered to do it."
+    rubric: >-
+      Lists exactly three action items with the right owners (Priya: budget draft by Friday;
+      Tom: book the venue; Lee: update the website). Does not list the launch decision as an
+      action item.
+
+  - id: flour-cups
+    prompt: >-
+      A recipe needs 250 g of flour. About how many cups is that? Answer in one sentence and say
+      it's approximate.
+    rubric: >-
+      Gives about 2 cups (anything from 1.75 to 2.1 is fine), says it's approximate, and is one
+      sentence.
+
+  - id: rain-haiku
+    prompt: "Write a haiku about rain."
+    rubric: "Three lines, close to 5-7-5 syllables, about rain, and nothing but the poem."
+
+  - id: damaged-order
+    prompt: >-
+      A customer writes: "My order arrived damaged." Write the support team's reply. Apologize
+      and offer a replacement or a refund, in under 60 words.
+    rubric: >-
+      Apologizes, offers a replacement or a refund, stays professional, and is under 60 words.
+
+  - id: cache-explained
+    prompt: >-
+      Explain what a cache is in computing to someone non-technical, in two sentences, using an
+      everyday comparison.
+    rubric: >-
+      Two sentences, uses an everyday comparison, is accurate (a cache keeps copies of things
+      used often so they're faster to get), and has no unexplained jargon.
