@@ -25,8 +25,16 @@ from grady.config import (
     select_models,
 )
 from grady.progress import RunProgress
-from grady.records import ModelInfo, ResultRecord, RunMeta, RunSettings, Totals, utc_now
-from grady.runner import Job, build_jobs, git_sha, new_run_id, run_jobs, sha256_of
+from grady.records import (
+    ModelInfo,
+    ResultRecord,
+    RunMeta,
+    RunSettings,
+    Totals,
+    WarmupRecord,
+    utc_now,
+)
+from grady.runner import Job, build_jobs, git_sha, new_run_id, run_jobs, sha256_of, warm_up
 
 EXIT_OK = 0
 EXIT_BELOW_THRESHOLD = 1
@@ -81,6 +89,13 @@ def run(
     min_pass_rate: Annotated[
         float, typer.Option(min=0.0, max=1.0, help="Exit 1 when the pass rate is below this.")
     ] = 0.0,
+    warmup: Annotated[
+        bool,
+        typer.Option(
+            "--warmup/--no-warmup",
+            help="Send one untimed request per model first, so load time isn't measured.",
+        ),
+    ] = True,
 ) -> None:
     """Run SUITE against one or more models and write one JSONL record per case x model."""
     err = Console(stderr=True, soft_wrap=True)
@@ -98,7 +113,11 @@ def run(
         raise typer.Exit(EXIT_CONFIG) from None
 
     settings = RunSettings(
-        concurrency=concurrency, timeout=timeout, retries=retries, min_pass_rate=min_pass_rate
+        concurrency=concurrency,
+        timeout=timeout,
+        retries=retries,
+        min_pass_rate=min_pass_rate,
+        warmup=warmup,
     )
     jobs = build_jobs(suite, models)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -123,7 +142,9 @@ def run(
         highlight=False,
     )
     try:
-        records = asyncio.run(_execute(jobs, suite, models, api_keys, settings, run_id, out_path))
+        records = asyncio.run(
+            _execute(jobs, suite, models, api_keys, settings, run_id, out_path, meta, err)
+        )
     except KeyboardInterrupt:
         err.print(f"Interrupted. Completed results are in {out_path}", markup=False)
         raise typer.Exit(EXIT_INTERRUPTED) from None
@@ -168,8 +189,18 @@ async def _execute(
     settings: RunSettings,
     run_id: str,
     out_path: Path,
+    meta: RunMeta,
+    err: Console,
 ) -> list[ResultRecord]:
     async with ChatClient(timeout=settings.timeout, retries=settings.retries) as client:
+        if settings.warmup:
+            # One model at a time, so a local server loads them one by one rather than all at
+            # once. Results go into the metadata as they arrive.
+            for model in models:
+                err.print(f"Warm-up {model.label} ...", markup=False, highlight=False)
+                record = await warm_up(client, model, api_keys[model.label])
+                meta.warmup.append(record)
+                err.print(_describe_warmup(record), markup=False, highlight=False)
         with (
             out_path.open("x", encoding="utf-8") as out,
             RunProgress(total=len(jobs)) as progress,
@@ -177,6 +208,15 @@ async def _execute(
             return await run_jobs(
                 jobs, suite, client, api_keys, run_id, out, progress, settings.concurrency
             )
+
+
+def _describe_warmup(record: WarmupRecord) -> str:
+    if record.error is None:
+        return f"Warm-up {record.label}: ready in {record.latency_s:.2f}s"
+    return (
+        f"Warm-up {record.label} failed: {record.error}. "
+        "Running anyway; each job will record its own error."
+    )
 
 
 def _write_meta(path: Path, meta: RunMeta) -> None:

@@ -52,6 +52,16 @@ class RunSettings(BaseModel):
     timeout: float
     retries: int
     min_pass_rate: float
+    warmup: bool
+
+
+class WarmupRecord(BaseModel):
+    """The untimed request sent to each model before the run, so load time isn't scored."""
+
+    label: str
+    latency_s: float | None
+    attempts: int
+    error: str | None
 
 
 class Totals(BaseModel):
@@ -85,5 +95,6 @@ class RunMeta(BaseModel):
     settings: RunSettings
     git_sha: str | None
     started_at: str
+    warmup: list[WarmupRecord] = []
     finished_at: str | None = None
     totals: Totals | None = None

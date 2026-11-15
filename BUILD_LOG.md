@@ -64,7 +64,18 @@ against gemma3:4b on a local Ollama: 8/8 pass warm, exit codes 1 and 3 reproduce
 - The fake server's `serve_forever` default poll of 0.5 s added half a second to every test
   teardown. The suite went from 6.2 s to 1.7 s.
 
-**Review caught:** _(maintainer to fill in from PR comments)_
+**Review caught** (maintainer, PR #5):
+- **Cold-start time was being scored as model latency.** The maintainer asked for a warm-up
+  request so the model is loaded before timing starts. Added: one untimed `max_tokens: 1`
+  request per model (`--no-warmup` to skip), its latency recorded in `.meta.json`. A failed
+  warm-up warns and the run continues, so every job still reports honestly. Re-run from a
+  cold Ollama: the 3.3 s load went to the warm-up, and job latencies dropped from 4–5 s to
+  0.3–2.3 s, matching a warm run.
+- Kept: rejecting unquoted YAML numbers in scorer arguments, to revisit if a real use case
+  appears.
+- Kept: any request error means exit 3, even above the pass threshold, because an incomplete
+  run shouldn't vouch for its own pass rate.
+- Accepted: the `count-letters` regex fix.
 
 **Changed by hand:** _(maintainer to fill in)_
 

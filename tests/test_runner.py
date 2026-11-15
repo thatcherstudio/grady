@@ -99,13 +99,20 @@ def test_happy_path_writes_records_meta_and_summary(tmp_path: Path, server: Fake
     assert isinstance(add["latency_s"], float)
     assert isinstance(add["tokens_per_s"], float)
 
-    # The system prompt from defaults was sent first.
-    assert server.requests[0]["messages"][0] == {"role": "system", "content": "Be brief."}
+    # One untimed warm-up request first, then the 3 jobs with the suite's system prompt.
+    warmup_request, *job_requests = server.requests
+    assert warmup_request["max_tokens"] == 1
+    assert len(job_requests) == 3
+    assert all(r["messages"][0] == {"role": "system", "content": "Be brief."} for r in job_requests)
 
     meta = json.loads((tmp_path / "out" / "run.meta.json").read_text())
     assert meta["totals"] == {"jobs": 3, "passed": 2, "failed": 1, "errors": 0, "pass_rate": 2 / 3}
     assert meta["models"] == [{"label": "model-0", "base_url": server.base_url, "model": "fake-0"}]
     assert meta["finished_at"]
+    assert meta["settings"]["warmup"] is True
+    (warmup,) = meta["warmup"]
+    assert warmup["label"] == "model-0" and warmup["error"] is None
+    assert "Warm-up model-0: ready in" in stderr
 
     assert "pass 2 fail 1" in stderr  # final progress line
     assert "model-0" in stdout and "67%" in stdout  # summary table
@@ -149,15 +156,61 @@ def test_unreachable_endpoint_records_errors_and_exits_3(tmp_path: Path) -> None
     assert "err 3" in stderr
     assert "ConnectError" in stderr
     assert "3 request(s) failed after retries" in stderr
+    assert "Warm-up model-0 failed: ConnectError" in stderr
 
 
 def test_request_errors_outrank_threshold(tmp_path: Path, server: FakeServer) -> None:
-    server.fail_next = [400]  # one non-retryable failure
+    server.fail_next = [400]  # one non-retryable failure, hitting the first job
     suite, models = write_files(tmp_path, server.base_url)
     code, _, _ = run(
-        suite, "--models", models, "--out", tmp_path / "x.jsonl", "--min-pass-rate", "0.0"
+        suite,
+        "--models",
+        models,
+        "--out",
+        tmp_path / "x.jsonl",
+        "--min-pass-rate",
+        "0.0",
+        "--no-warmup",
     )
     assert code == 3
+
+
+def test_no_warmup_sends_only_the_jobs(tmp_path: Path, server: FakeServer) -> None:
+    suite, models = write_files(tmp_path, server.base_url)
+    out = tmp_path / "x.jsonl"
+    code, _, stderr = run(suite, "--models", models, "--out", out, "--no-warmup")
+    assert code == 0
+    assert len(server.requests) == 3
+    assert all(r["max_tokens"] != 1 for r in server.requests)
+    meta = json.loads(out.with_suffix(".meta.json").read_text())
+    assert meta["settings"]["warmup"] is False
+    assert meta["warmup"] == []
+    assert "Warm-up" not in stderr
+
+
+def test_warmup_is_one_per_model_and_never_scored(tmp_path: Path, server: FakeServer) -> None:
+    suite, models = write_files(tmp_path, server.base_url, server.base_url)
+    out = tmp_path / "x.jsonl"
+    code, _, _ = run(suite, "--models", models, "--out", out)
+    assert code == 0
+    assert len(server.requests) == 2 + 6
+    assert [r["model"] for r in server.requests[:2]] == ["fake-0", "fake-1"]
+    assert len(read_records(out)) == 6  # warm-ups never appear in results
+
+
+def test_failed_warmup_is_reported_and_the_run_continues(
+    tmp_path: Path, server: FakeServer
+) -> None:
+    server.fail_next = [400]  # the warm-up fails; every job then succeeds
+    suite, models = write_files(tmp_path, server.base_url)
+    out = tmp_path / "x.jsonl"
+    code, _, stderr = run(suite, "--models", models, "--out", out)
+    assert code == 0  # results are complete, so the warm-up failure doesn't fail the run
+    assert "Warm-up model-0 failed: HTTP 400" in stderr
+    assert "Running anyway" in stderr
+    assert len(read_records(out)) == 3
+    (warmup,) = json.loads(out.with_suffix(".meta.json").read_text())["warmup"]
+    assert warmup["error"].startswith("HTTP 400")
 
 
 def test_missing_api_key_fails_before_sending(

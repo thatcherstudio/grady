@@ -20,7 +20,7 @@ from typing import TextIO
 from grady.client import ChatClient, Message
 from grady.config import Case, ModelSpec, Suite
 from grady.progress import Outcome, RunProgress
-from grady.records import ResultRecord, ScoreRecord, utc_now
+from grady.records import ResultRecord, ScoreRecord, WarmupRecord, utc_now
 from grady.scorers import ScoreInput
 
 
@@ -99,6 +99,27 @@ async def execute_job(
         attempts=completion.attempts,
         error=completion.error,
         started_at=started_at,
+    )
+
+
+WARMUP_MESSAGES: list[Message] = [{"role": "user", "content": "Reply with OK."}]
+
+
+async def warm_up(client: ChatClient, model: ModelSpec, api_key: str | None) -> WarmupRecord:
+    """Send one tiny untimed request so a cold local server loads the model before timing.
+
+    The answer is not scored or written to results. A failure is reported, not fatal: the
+    jobs still run and each records its own error.
+    """
+    completion = await client.chat(
+        model, WARMUP_MESSAGES, temperature=0.0, max_tokens=1, api_key=api_key
+    )
+    latency = completion.latency_s
+    return WarmupRecord(
+        label=model.label,
+        latency_s=round(latency, 3) if latency is not None else None,
+        attempts=completion.attempts,
+        error=completion.error,
     )
 
 
