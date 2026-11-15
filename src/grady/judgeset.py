@@ -4,10 +4,11 @@
         --model ollama-gemma3-4b --model ollama-gemma3-1b
 
 Reads ``judge-check/cases.yaml`` and writes ``judge-check/candidates.jsonl``, one line per
-prompt x model. Ids are numbered in a shuffled order, so ``tone-01-2`` says nothing about
-which model wrote it; the ``source`` field does, so grade with ``grady label`` before opening
-the file. Use models of different strength: a set where every answer passes can't show
-whether the judge agrees with you.
+prompt x model. ``--add`` keeps the existing answers (and their labels) and answers only the
+missing pairs, for new prompts or a new model. Ids are numbered in a shuffled model order;
+the ``source`` field names the model, so grade with ``grady label`` before opening the file.
+Use models of different strength: a set where every answer passes can't show whether the
+judge agrees with you.
 
 Any failed request stops the run and nothing is written. A set with holes would quietly drop
 exactly the prompts a model struggles with.
@@ -20,7 +21,8 @@ import asyncio
 import os
 import random
 import sys
-from collections.abc import Sequence
+from collections import Counter
+from collections.abc import Sequence, Set
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -36,7 +38,7 @@ from grady.config import (
     resolve_api_keys,
     select_models,
 )
-from grady.labeling import Candidate
+from grady.labeling import Candidate, read_jsonl
 from grady.runner import warm_up
 
 EXIT_OK = 0
@@ -87,16 +89,23 @@ async def answer_all(
     *,
     timeout: float,
     retries: int,
+    have: Set[tuple[str, str]] = frozenset(),
 ) -> dict[tuple[str, str], str]:
-    """Every prompt x model, one request at a time. Raises on the first failed request."""
+    """Every (prompt, model) pair not in ``have``, one request at a time.
+
+    Raises on the first failed request.
+    """
     answers: dict[tuple[str, str], str] = {}
     async with ChatClient(timeout=timeout, retries=retries) as chat:
         for model in models:
+            todo = [case for case in rubrics.cases if (case.id, model.label) not in have]
+            if not todo:
+                continue
             key = api_keys[model.label]
             warm = await warm_up(chat, model, key)
             if warm.error is not None:
                 raise RequestFailedError(f"warm-up {model.label}: {warm.error}")
-            for case in rubrics.cases:
+            for case in todo:
                 completion = await chat.chat(
                     model,
                     [{"role": "user", "content": case.prompt}],
@@ -113,18 +122,19 @@ async def answer_all(
 
 def build_candidates(
     rubrics: RubricSet,
-    models: Sequence[ModelSpec],
     answers: dict[tuple[str, str], str],
     rng: random.Random,
+    existing: Sequence[Candidate] = (),
 ) -> list[Candidate]:
-    """Number each prompt's answers in a shuffled model order, so ids don't reveal the model."""
+    """Number each prompt's new answers in a shuffled model order, after any existing ones."""
+    taken = Counter(c.case_id for c in existing)
     candidates: list[Candidate] = []
     for case in rubrics.cases:
-        labels = rng.sample([m.label for m in models], k=len(models))
-        for n, source in enumerate(labels, start=1):
+        sources = [source for case_id, source in answers if case_id == case.id]
+        for n, source in enumerate(rng.sample(sources, k=len(sources)), start=1):
             candidates.append(
                 Candidate(
-                    id=f"{case.id}-{n}",
+                    id=f"{case.id}-{taken[case.id] + n}",
                     case_id=case.id,
                     prompt=case.prompt,
                     rubric=case.rubric,
@@ -135,38 +145,63 @@ def build_candidates(
     return candidates
 
 
+def check_existing(rubrics: RubricSet, existing: Sequence[Candidate], path: Path) -> None:
+    """Answers kept by --add must still match their prompt and rubric."""
+    cases = {case.id: case for case in rubrics.cases}
+    for candidate in existing:
+        case = cases.get(candidate.case_id)
+        if case is not None and (case.prompt, case.rubric) != (candidate.prompt, candidate.rubric):
+            raise ConfigError(
+                f"{path}: case {case.id!r} has changed since its answers were made; restore it, "
+                "or give the changed case a new id"
+            )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         rubrics = load_rubric_set(args.cases)
         models = select_models(load_models(args.models), args.model or [])
         api_keys = resolve_api_keys(models, os.environ)
-        if args.out.exists() and not args.force:
-            raise ConfigError(
-                f"{args.out} already exists and labels are tied to its answers; "
-                "pass --force to replace it"
-            )
+        existing: list[Candidate] = []
+        if args.out.exists():
+            if args.add:
+                existing = read_jsonl(args.out, Candidate)
+                check_existing(rubrics, existing, args.out)
+            elif not args.force:
+                raise ConfigError(
+                    f"{args.out} already exists and labels are tied to its answers; pass --add "
+                    "to answer only what's missing, or --force to replace it"
+                )
     except ConfigError as exc:
         _log(f"error: {exc}")
         return EXIT_CONFIG
     if len(models) < 2:
         _log("note: with one model, each prompt gets one answer; two or more models give a mix")
 
+    have = {(c.case_id, c.source) for c in existing}
     try:
         answers = asyncio.run(
-            answer_all(rubrics, models, api_keys, timeout=args.timeout, retries=args.retries)
+            answer_all(
+                rubrics, models, api_keys, timeout=args.timeout, retries=args.retries, have=have
+            )
         )
     except RequestFailedError as exc:
         _log(f"error: {exc}. Nothing was written.")
         return EXIT_REQUEST_ERRORS
+    if not answers:
+        _log(f"Nothing to add: {args.out} has an answer from every model for every prompt.")
+        return EXIT_OK
 
-    candidates = build_candidates(rubrics, models, answers, random.Random(args.seed))
+    new = build_candidates(rubrics, answers, random.Random(args.seed), existing)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text("".join(c.model_dump_json() + "\n" for c in candidates), encoding="utf-8")
+    tmp = args.out.with_name(args.out.name + ".tmp")
+    tmp.write_text("".join(c.model_dump_json() + "\n" for c in [*existing, *new]), "utf-8")
+    tmp.replace(args.out)
     _log(
-        f"Wrote {len(candidates)} candidates ({len(rubrics.cases)} prompts x {len(models)} "
-        f"models) to {args.out}. Grade them with `grady label` before opening the file: "
-        "it names the model behind each answer."
+        f"Wrote {len(new)} new candidates to {args.out} ({len(existing) + len(new)} in all). "
+        "Grade them with `grady label` before opening the file: it names the model behind "
+        "each answer."
     )
     return EXIT_OK
 
@@ -188,6 +223,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=None, help="Seed for id numbering.")
     parser.add_argument("--timeout", type=float, default=120.0, help="Seconds per request.")
     parser.add_argument("--retries", type=int, default=2, help="Retries after the first try.")
+    parser.add_argument(
+        "--add", action="store_true", help="Keep existing answers; answer only what's missing."
+    )
     parser.add_argument("--force", action="store_true", help="Replace an existing output file.")
     return parser
 

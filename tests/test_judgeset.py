@@ -33,7 +33,7 @@ def setup_files(tmp_path: Path, *base_urls: str, cases: str | None = None) -> li
     (tmp_path / "cases.yaml").write_text(cases or rubric_yaml(PROMPTS), encoding="utf-8")
     entries = [
         f"  - {{ label: {name}, base_url: '{url}', model: fake }}"
-        for name, url in zip(("strong", "weak"), base_urls, strict=False)
+        for name, url in zip(("strong", "weak", "tiny"), base_urls, strict=False)
     ]
     (tmp_path / "models.yaml").write_text("models:\n" + "\n".join(entries) + "\n", "utf-8")
     return [
@@ -137,6 +137,70 @@ def test_a_failed_warm_up_stops_before_any_prompt(
     assert main(args) == 3
     assert "error: warm-up strong: HTTP 400" in capsys.readouterr().err
     assert len(strong.requests) == 1
+
+
+def test_add_answers_only_the_missing_model(
+    tmp_path: Path, servers: tuple[FakeServer, FakeServer]
+) -> None:
+    strong, weak = servers
+    assert main(setup_files(tmp_path, strong.base_url, weak.base_url)) == 0
+    before = read_out(tmp_path)
+    sent = (len(strong.requests), len(weak.requests))
+
+    with FakeServer(default_answer="tiny answer") as tiny:
+        args = setup_files(tmp_path, strong.base_url, weak.base_url, tiny.base_url)
+        assert main([*args, "--add"]) == 0
+        assert len(tiny.requests) == 11  # warm-up + 10 prompts
+
+    after = read_out(tmp_path)
+    assert after[:20] == before
+    assert (len(strong.requests), len(weak.requests)) == sent
+    added = after[20:]
+    assert {r["source"] for r in added} == {"tiny"}
+    assert sorted(r["id"] for r in added) == sorted(f"{c}-3" for c in PROMPTS)
+
+
+def test_add_answers_a_new_prompt_with_every_model(
+    tmp_path: Path, servers: tuple[FakeServer, FakeServer]
+) -> None:
+    strong, weak = servers
+    assert main(setup_files(tmp_path, strong.base_url, weak.base_url)) == 0
+    more = rubric_yaml({**PROMPTS, "extra": "One more prompt"})
+    args = setup_files(tmp_path, strong.base_url, weak.base_url, cases=more)
+
+    assert main([*args, "--add"]) == 0
+
+    added = read_out(tmp_path)[20:]
+    assert sorted(r["id"] for r in added) == ["extra-1", "extra-2"]
+    assert sorted(r["source"] for r in added) == ["strong", "weak"]
+
+
+def test_add_with_nothing_missing_changes_nothing(
+    tmp_path: Path, servers: tuple[FakeServer, FakeServer], capsys: pytest.CaptureFixture[str]
+) -> None:
+    strong, weak = servers
+    args = setup_files(tmp_path, strong.base_url, weak.base_url)
+    assert main(args) == 0
+    before = (tmp_path / "out" / "candidates.jsonl").read_text(encoding="utf-8")
+    sent = len(strong.requests)
+
+    assert main([*args, "--add"]) == 0
+
+    assert "Nothing to add" in capsys.readouterr().err
+    assert (tmp_path / "out" / "candidates.jsonl").read_text(encoding="utf-8") == before
+    assert len(strong.requests) == sent  # not even a warm-up
+
+
+def test_add_refuses_a_changed_rubric(
+    tmp_path: Path, servers: tuple[FakeServer, FakeServer], capsys: pytest.CaptureFixture[str]
+) -> None:
+    strong, weak = servers
+    assert main(setup_files(tmp_path, strong.base_url, weak.base_url)) == 0
+    changed = rubric_yaml(PROMPTS).replace("Be right.", "Be very right.", 1)
+    args = setup_files(tmp_path, strong.base_url, weak.base_url, cases=changed)
+
+    assert main([*args, "--add"]) == 2
+    assert "case 'case0' has changed since its answers were made" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(

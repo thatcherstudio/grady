@@ -11,6 +11,11 @@ models:
     base_url: http://localhost:11434/v1
     model: gemma3:1b
 
+  # A much smaller model, so the judge-check set has fails too: `ollama pull qwen2.5:0.5b`.
+  - label: ollama-qwen2.5-0.5b
+    base_url: http://localhost:11434/v1
+    model: qwen2.5:0.5b
+
   # vLLM: `vllm serve <hf-model-id>`; set `model` to that id.
   - label: vllm-local
     base_url: http://localhost:8000/v1

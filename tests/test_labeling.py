@@ -164,6 +164,26 @@ def test_labels_without_a_candidate_are_kept(tmp_path: Path) -> None:
     assert [lab.id for lab in resumed.ordered_labels()] == ["a-1", "gone-1"]
 
 
+def test_redo_puts_a_label_back_in_the_queue(tmp_path: Path) -> None:
+    items = [candidate("a", 1), candidate("b", 1), candidate("c", 1)]
+    session = session_for(tmp_path, items)
+    while session.current is not None:
+        session.mark("pass", "t")
+    save_labels(tmp_path / "labeled.jsonl", session.ordered_labels())
+
+    cands = tmp_path / "candidates.jsonl"
+    redo = load_session(cands, tmp_path / "labeled.jsonl", random.Random(0), redo=["b-1"])
+    assert [c.id for c in redo.queue] == ["b-1"]
+    assert sorted(redo.labels) == ["a-1", "c-1"]
+    assert "b-1" not in redo.history
+
+
+def test_redo_of_an_unlabeled_id_is_an_error(tmp_path: Path) -> None:
+    cands = write_candidates(tmp_path / "candidates.jsonl", [candidate("a", 1)])
+    with pytest.raises(ConfigError, match=r"--redo 'a-1': .* has no label with that id"):
+        load_session(cands, tmp_path / "labeled.jsonl", random.Random(0), redo=["a-1"])
+
+
 def test_save_is_atomic_and_leaves_no_temp_file(tmp_path: Path) -> None:
     out = tmp_path / "nested" / "labeled.jsonl"
     save_labels(out, [])
@@ -245,6 +265,7 @@ def test_cli_grades_every_card_blind(tmp_path: Path) -> None:
     assert code == 0, output
     assert "Rubric for a" in output and "answer c2" in output  # the cards were drawn...
     assert "Card 1 of 6" in output and "0 saved" in output
+    assert not any(c.id in output for c in items)  # ids can hint at the model, so no ids
     assert SECRET not in output and "other-model" not in output  # ...without the source
     assert "Done. 6/6 labeled: 4 pass, 2 fail, 1 unsure." in output
     labels = read_labels(out)
@@ -297,6 +318,20 @@ def test_cli_undo_key(tmp_path: Path) -> None:
     assert "Undid pass." in output
     assert "Stopped. 1/3 labeled" in output
     assert len(read_labels(out)) == 1
+
+
+def test_cli_redo_grades_an_answer_again(tmp_path: Path) -> None:
+    cands = write_candidates(tmp_path / "candidates.jsonl", [candidate("a", 1), candidate("b", 1)])
+    out = tmp_path / "labeled.jsonl"
+    label_cli(cands, out, "pp")
+
+    result = CliRunner().invoke(
+        app, ["label", str(cands), "--out", str(out), "--redo", "a-1"], input="f"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Done. 2/2 labeled: 1 pass, 1 fail" in result.output
+    assert {lab["id"]: lab["label"] for lab in read_labels(out)} == {"a-1": "fail", "b-1": "pass"}
 
 
 def test_cli_warns_on_a_lopsided_set(tmp_path: Path) -> None:

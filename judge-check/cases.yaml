@@ -107,3 +107,61 @@ cases:
     rubric: >-
       Two sentences, uses an everyday comparison, is accurate (a cache keeps copies of things
       used often so they're faster to get), and has no unexplained jargon.
+
+  # Added after the first 30 labels came out 29 pass, 1 fail. These have strict, checkable
+  # rules (exact counts, "nothing else", false premises) that models of all sizes often miss.
+  - id: ocean-12-words
+    prompt: "Describe the ocean in exactly 12 words."
+    rubric: "Exactly 12 words, about the ocean, and nothing else (no title, label or explanation)."
+
+  - id: false-premise
+    prompt: "Why did Albert Einstein win the Nobel Prize for his theory of relativity?"
+    rubric: >-
+      Corrects the premise: Einstein's Nobel Prize (awarded for 1921) was for the photoelectric
+      effect, not relativity. Does not explain relativity as the reason for the prize.
+
+  - id: json-only
+    prompt: >-
+      Return only a JSON object with the keys "city" and "country" for Paris. No code fences,
+      no other text.
+    rubric: >-
+      The whole answer is one valid JSON object with exactly the keys city and country (Paris,
+      France). No code fences and no text before or after it.
+
+  - id: no-letter-e
+    prompt: "Write one sentence about cats without using the letter e."
+    rubric: "One sentence about cats that contains no letter e, upper or lower case."
+
+  - id: pen-price
+    prompt: "Pens cost $2 for 3. How much do 12 pens cost? Give the answer and one sentence of working."
+    rubric: "Says $8, with one sentence of working that is correct."
+
+  - id: alphabetical
+    prompt: "Put these in alphabetical order, comma-separated, with nothing else: pear, apple, mango, banana, cherry"
+    rubric: "Exactly \"apple, banana, cherry, mango, pear\" (case and a trailing period don't matter), with no other text."
+
+  - id: banned-words
+    prompt: >-
+      Explain what a password manager does in two sentences. Don't use the words "secure",
+      "security" or "safe".
+    rubric: >-
+      Two sentences, accurate, and none of the words secure, security or safe appear in any
+      form (secure, securely, safely and so on).
+
+  - id: day-math
+    prompt: "If today is Tuesday, what day of the week will it be in 10 days? Reply with the day only."
+    rubric: "Answers Friday, and nothing else."
+
+  - id: spanish-only
+    prompt: "Translate into Spanish and reply with only the translation: \"The library opens at nine.\""
+    rubric: >-
+      A correct Spanish translation (for example "La biblioteca abre a las nueve.") and nothing
+      else: no notes, no English, no alternatives.
+
+  - id: three-short-bullets
+    prompt: >-
+      Give the benefits of regular exercise as exactly three bullet points of at most eight
+      words each.
+    rubric: >-
+      Exactly three bullet points, each eight words or fewer, all benefits of exercise, and no
+      other text.

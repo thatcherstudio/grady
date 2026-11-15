@@ -200,6 +200,7 @@ grady run SUITE --models MODELS_FILE
 grady label [CANDIDATES]                # default: judge-check/candidates.jsonl
             [--out PATH]                # default: judge-check/labeled.jsonl; resumes if present
             [--seed N]                  # grading order; default: random
+            [--redo ID]...              # grade these answers again, blind
 ```
 
 One card per answer: rubric, prompt and answer, shown raw. Keys: `→` or `p` pass, `←` or `f`
@@ -305,7 +306,10 @@ pass_rate).
 
 `judge-check/cases.yaml` holds rubric prompts: `temperature`, `max_tokens` and `cases`, each
 with `id`, `prompt` and `rubric`. `python -m grady.judgeset --models FILE --model A --model B`
-answers every prompt with every model and writes `judge-check/candidates.jsonl`:
+answers every prompt with every model and writes `judge-check/candidates.jsonl`. With `--add`
+it keeps the existing answers, and so their labels, and answers only the missing prompt and
+model pairs, for new prompts or a new model. It refuses if a kept answer's prompt or rubric has
+since changed in `cases.yaml`.
 
 ```json
 {"id": "polite-reminder-2", "case_id": "polite-reminder", "prompt": "...", "rubric": "...",
@@ -321,8 +325,9 @@ Rules, each there to keep the agreement number honest:
 - **Mixed strength.** Answers come from at least two models of different strength, so the set
   has fails as well as passes. When a finished set is less than 25% pass or less than 25% fail,
   `grady label` warns: on a lopsided set, agreement mostly measures the easy calls.
-- **Blind.** The card never shows `source`. Ids are numbered in a shuffled model order, so
-  `-1` doesn't mean the same model every time. Don't open `candidates.jsonl` before grading.
+- **Blind.** The card never shows `source`, or the id: answers added later are numbered after
+  the first batch, so on an older prompt a high number would hint at the newer model. Don't
+  open `candidates.jsonl` before grading.
 - **Spread apart.** Two answers to the same prompt are never shown back to back, so each is
   graded against the rubric, not against the other answer.
 - **No skip.** Unsure answers are the most informative ones, and skipping them inflates

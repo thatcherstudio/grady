@@ -189,6 +189,10 @@ def label(
     seed: Annotated[
         int | None, typer.Option(help="Seed for the grading order. Default: random.")
     ] = None,
+    redo: Annotated[
+        list[str] | None,
+        typer.Option("--redo", help="Grade this answer again, by id. Repeatable."),
+    ] = None,
 ) -> None:
     """Grade answers by hand, one card at a time: → pass, ← fail. Saves after every key.
 
@@ -197,7 +201,7 @@ def label(
     """
     err = Console(stderr=True, soft_wrap=True)
     try:
-        session = load_session(candidates_path, out, random.Random(seed))
+        session = load_session(candidates_path, out, random.Random(seed), redo or [])
     except ConfigError as exc:
         err.print(f"error: {exc}", markup=False, highlight=False)
         raise typer.Exit(EXIT_CONFIG) from None

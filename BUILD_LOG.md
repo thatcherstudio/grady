@@ -102,7 +102,25 @@ models; 15 rubric prompts in `judge-check/cases.yaml`; and 36 tests. It generate
 answers; it checked only counts (30 rows, 15 prompts, none empty). It also drove the real
 command through a pseudo-terminal with arrow-key bytes and Ctrl-C to check the raw-key path.
 
-**Review caught:** _(maintainer to fill in)_
+**Review caught** (maintainer, while grading on PR #6):
+- **The header looked like a done count.** After grading 9 cards the maintainer had 8 labels
+  saved: the header said "9/30" on the card being shown. It now reads "Card 9 of 30 · 8 saved".
+  The same check found that a fast double press of an arrow arrives as one read
+  (`\x1b[C\x1b[C`) and was rejected as an unknown key. Now the first arrow counts.
+- **The set was too easy: 29 pass, 1 fail.** `gemma3:1b` passed all 15 prompts, so it wasn't
+  the weak model it was meant to be. On a set like that, a judge that passes everything agrees
+  97% of the time and scores 0 on kappa. `grady label`'s balance warning fired. Fix:
+  10 prompts with strict, checkable rules (exact counts, "nothing else", a false premise),
+  answered by both gemma models and `qwen2.5:0.5b`, plus `qwen2.5:0.5b` on the original 15.
+  That adds 45 answers, 75 in all. `python -m grady.judgeset --add` appends them without
+  touching the 30 already labeled.
+- **Two labels contradicted their rubric.** The agent compared countable rubric rules (word
+  and line counts) with the labels without reading the answers. All matched except both
+  `subject-line` answers: 12–13 lines and about 100 words each, labeled pass against "One
+  subject line only, under 10 words". The judge sees only the rubric, so the maintainer chose
+  to re-grade both to the rubric as written (`grady label --redo ID`), not to loosen it.
+  Ids came off the card at the same time, since numbers added by `--add` would hint at the
+  newer model.
 
 **Changed by hand:** _(maintainer to fill in)_
 

@@ -202,8 +202,17 @@ class LabelSession:
         )
 
 
-def load_session(candidates_path: Path, labels_path: Path, rng: random.Random) -> LabelSession:
-    """Start or resume. A label given to a different answer than the current one is an error."""
+def load_session(
+    candidates_path: Path,
+    labels_path: Path,
+    rng: random.Random,
+    redo: Sequence[str] = (),
+) -> LabelSession:
+    """Start or resume. A label given to a different answer than the current one is an error.
+
+    Ids in ``redo`` lose their label and go back in the queue, to be graded again blind. The
+    old label stays in the file until a key changes something.
+    """
     candidates = read_jsonl(candidates_path, Candidate)
     if not candidates:
         raise ConfigError(f"{candidates_path}: no candidates found")
@@ -224,6 +233,9 @@ def load_session(candidates_path: Path, labels_path: Path, rng: random.Random) -
             )
         else:
             labels[label.id] = label
+    for ident in redo:
+        if labels.pop(ident, None) is None:
+            raise ConfigError(f"--redo {ident!r}: {labels_path} has no label with that id")
 
     history = [label.id for label in sorted(labels.values(), key=lambda lab: lab.labeled_at)]
     queue = grading_order([c for c in candidates if c.id not in labels], rng)
@@ -281,7 +293,11 @@ def grade(
 
 
 def render_card(session: LabelSession, candidate: Candidate, status: str) -> RenderableType:
-    """The rubric, prompt and answer, exactly as the judge will see them. Never the source."""
+    """The rubric, prompt and answer, exactly as the judge will see them.
+
+    Never the source model, and not the id either: ids added later by ``--add`` are numbered
+    after the first batch, so on an older prompt a high number would hint at the newer model.
+    """
     done = len(session.labels)
     total = len(session.candidates)
     header = Table.grid(padding=(0, 2))
@@ -289,7 +305,6 @@ def render_card(session: LabelSession, candidate: Candidate, status: str) -> Ren
         Text(f"Card {done + 1} of {total}", style="bold"),
         ProgressBar(total=total, completed=done, width=30),
         Text(f"{done} saved", style="dim"),
-        Text(candidate.id, style="dim"),
     )
 
     body = Table.grid(padding=(0, 2))
