@@ -178,10 +178,16 @@ def test_redo_puts_a_label_back_in_the_queue(tmp_path: Path) -> None:
     assert "b-1" not in redo.history
 
 
-def test_redo_of_an_unlabeled_id_is_an_error(tmp_path: Path) -> None:
+def test_redo_of_an_unknown_id_is_an_error(tmp_path: Path) -> None:
     cands = write_candidates(tmp_path / "candidates.jsonl", [candidate("a", 1)])
-    with pytest.raises(ConfigError, match=r"--redo 'a-1': .* has no label with that id"):
-        load_session(cands, tmp_path / "labeled.jsonl", random.Random(0), redo=["a-1"])
+    with pytest.raises(ConfigError, match=r"--redo 'zz-9': no answer with that id"):
+        load_session(cands, tmp_path / "labeled.jsonl", random.Random(0), redo=["zz-9"])
+
+
+def test_redo_of_an_unlabeled_answer_is_fine(tmp_path: Path) -> None:
+    cands = write_candidates(tmp_path / "candidates.jsonl", [candidate("a", 1)])
+    session = load_session(cands, tmp_path / "labeled.jsonl", random.Random(0), redo=["a-1"])
+    assert [c.id for c in session.queue] == ["a-1"]
 
 
 def test_save_is_atomic_and_leaves_no_temp_file(tmp_path: Path) -> None:

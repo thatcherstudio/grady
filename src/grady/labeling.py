@@ -234,8 +234,9 @@ def load_session(
         else:
             labels[label.id] = label
     for ident in redo:
-        if labels.pop(ident, None) is None:
-            raise ConfigError(f"--redo {ident!r}: {labels_path} has no label with that id")
+        if ident not in by_id:
+            raise ConfigError(f"--redo {ident!r}: no answer with that id in {candidates_path}")
+        labels.pop(ident, None)  # an unlabeled answer is already in the queue
 
     history = [label.id for label in sorted(labels.values(), key=lambda lab: lab.labeled_at)]
     queue = grading_order([c for c in candidates if c.id not in labels], rng)
