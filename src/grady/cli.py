@@ -1,9 +1,11 @@
-"""Command-line interface. M1 ships ``grady run``; report, compare and judge-check follow."""
+"""Command-line interface: ``grady run`` and ``grady label``; report, compare and judge-check
+follow."""
 
 from __future__ import annotations
 
 import asyncio
 import os
+import random
 import statistics
 from collections.abc import Sequence
 from pathlib import Path
@@ -24,6 +26,7 @@ from grady.config import (
     resolve_api_keys,
     select_models,
 )
+from grady.labeling import grade, load_session, save_labels
 from grady.progress import RunProgress
 from grady.records import (
     ModelInfo,
@@ -41,6 +44,9 @@ EXIT_BELOW_THRESHOLD = 1
 EXIT_CONFIG = 2
 EXIT_REQUEST_ERRORS = 3
 EXIT_INTERRUPTED = 130
+
+DEFAULT_CANDIDATES = Path("judge-check/candidates.jsonl")
+DEFAULT_LABELS = Path("judge-check/labeled.jsonl")
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -170,6 +176,78 @@ def run(
             markup=False,
         )
     raise typer.Exit(code)
+
+
+@app.command()
+def label(
+    candidates_path: Annotated[
+        Path, typer.Argument(metavar="CANDIDATES", help="Answers to grade (JSONL).")
+    ] = DEFAULT_CANDIDATES,
+    out: Annotated[
+        Path, typer.Option(help="Labels file. If it exists, grading picks up where it stopped.")
+    ] = DEFAULT_LABELS,
+    seed: Annotated[
+        int | None, typer.Option(help="Seed for the grading order. Default: random.")
+    ] = None,
+    redo: Annotated[
+        list[str] | None,
+        typer.Option("--redo", help="Grade this answer again, by id. Repeatable."),
+    ] = None,
+) -> None:
+    """Grade answers by hand, one card at a time: → pass, ← fail. Saves after every key.
+
+    The model behind each answer is hidden. There is no skip: press ? to flag an answer
+    you're unsure about, then still make the call.
+    """
+    err = Console(stderr=True, soft_wrap=True)
+    try:
+        session = load_session(candidates_path, out, random.Random(seed), redo or [])
+    except ConfigError as exc:
+        err.print(f"error: {exc}", markup=False, highlight=False)
+        raise typer.Exit(EXIT_CONFIG) from None
+
+    console = Console()
+
+    def save() -> None:
+        save_labels(out, session.ordered_labels())
+
+    try:
+        outcome = grade(
+            session, console=console, read_key=typer.getchar, read_note=_read_note, save=save
+        )
+    except KeyboardInterrupt:
+        outcome = "quit"
+        code = EXIT_INTERRUPTED
+    else:
+        code = EXIT_OK
+
+    stats = session.stats()
+    console.print()
+    if outcome == "done":
+        console.print(f"Done. {stats.describe()}.", markup=False, highlight=False, soft_wrap=True)
+        warning = stats.balance_warning()
+        if warning:
+            err.print(warning, markup=False, highlight=False)
+    else:
+        console.print(
+            f"Stopped. {stats.describe()}. Run `grady label` again to continue.",
+            markup=False,
+            highlight=False,
+            soft_wrap=True,
+        )
+    console.print(f"Labels: {out}", markup=False, highlight=False, soft_wrap=True)
+    raise typer.Exit(code)
+
+
+def _read_note(current: str | None) -> str:
+    try:
+        return str(
+            typer.prompt(
+                "Note (empty clears it)", default=current or "", show_default=bool(current)
+            )
+        )
+    except typer.Abort:
+        return current or ""
 
 
 def exit_code_for(totals: Totals, min_pass_rate: float) -> int:

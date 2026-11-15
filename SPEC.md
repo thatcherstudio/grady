@@ -33,7 +33,7 @@ Grady is not trying to replace them. It differs in three ways:
 | M1 | Suite + models loader, async client (timeout, retry, concurrency), `exact` / `contains` / `regex` scorers, progress line, `grady run`, threshold exit code | `grady run examples/basic.yaml` against a local Ollama model prints progress and writes JSONL; CI green |
 | M2 | `json_schema` + `llm_judge` scorers, per-case `repeats` | The judge scorer runs against a local model; repeats report a per-case pass rate |
 | M3 | `grady report` (Markdown + one static HTML file) and `grady compare` | The HTML report opens offline with no server |
-| M4 | `grady judge-check` + hand-labeled set, GitHub Pages sample report, README | CI green, Pages link live, judge-check prints agreement |
+| M4 | `grady judge-check` against the hand-labeled set (built before M2), GitHub Pages sample report, README | CI green, Pages link live, judge-check prints agreement |
 
 Every milestone ships its own tests. CI (ruff, mypy, pytest, secret scan) runs on every PR from
 the first commit, and CI never calls a real model.
@@ -47,6 +47,9 @@ the first commit, and CI never calls a real model.
    Pages, judge-check and the README.
 3. **Scorers are async from M1.** `exact`, `contains` and `regex` don't need it, but `llm_judge`
    (M2) makes a network call, and one async interface avoids changing every scorer later.
+4. **The hand-labeled set and `grady label` come before M2, not in M4.** The labels have to
+   exist before the judge prompt is written, or the prompt gets tuned toward the answers it
+   already agrees with. M4 keeps `grady judge-check`, which compares the judge to these labels.
 
 ---
 
@@ -191,6 +194,20 @@ grady run SUITE --models MODELS_FILE
 | 2 | Usage or config error (bad suite, unknown model label, missing API key env var). Nothing was sent |
 | 3 | One or more requests still failed after retries. Results are incomplete, so this takes precedence over 1 |
 
+### `grady label` (judge-check set)
+
+```
+grady label [CANDIDATES]                # default: judge-check/candidates.jsonl
+            [--out PATH]                # default: judge-check/labeled.jsonl; resumes if present
+            [--seed N]                  # grading order; default: random
+            [--redo ID]...              # grade these answers again, blind
+```
+
+One card per answer: rubric, prompt and answer, shown raw. Keys: `→` or `p` pass, `←` or `f`
+fail, `?` flag as unsure, `n` add a note, `u` undo the last label (works across sessions), `q`
+quit. Every key that changes a label saves. Exit 0 when finished or quit, 2 on a bad file, 130
+on Ctrl-C (labels so far are saved). Section 9 has the file formats and grading rules.
+
 ### `grady report`, `grady compare` (M3), `grady judge-check` (M4)
 
 ```
@@ -285,6 +302,45 @@ pass_rate).
 
 ---
 
+### Judge-check set
+
+`judge-check/cases.yaml` holds rubric prompts: `temperature`, `max_tokens` and `cases`, each
+with `id`, `prompt` and `rubric`. `python -m grady.judgeset --models FILE --model A --model B`
+answers every prompt with every model and writes `judge-check/candidates.jsonl`. With `--add`
+it keeps the existing answers, and so their labels, and answers only the missing prompt and
+model pairs, for new prompts or a new model. It refuses if a kept answer's prompt or rubric has
+since changed in `cases.yaml`.
+
+```json
+{"id": "polite-reminder-2", "case_id": "polite-reminder", "prompt": "...", "rubric": "...",
+ "output": "...", "source": "ollama-gemma3-1b"}
+```
+
+`grady label` writes `judge-check/labeled.jsonl`: each candidate's fields plus
+`label` (`"pass"` or `"fail"`), `unsure`, `note` and `labeled_at`. Each line holds everything
+judge-check needs, so judge-check reads only this file.
+
+Rules, each there to keep the agreement number honest:
+
+- **Mixed strength.** Answers come from at least two models of different strength, so the set
+  has fails as well as passes. When a finished set is less than 25% pass or less than 25% fail,
+  `grady label` warns: on a lopsided set, agreement mostly measures the easy calls.
+- **Blind.** The card never shows `source`, or the id: answers added later are numbered after
+  the first batch, so on an older prompt a high number would hint at the newer model. Don't
+  open `candidates.jsonl` before grading.
+- **Spread apart.** Two answers to the same prompt are never shown back to back, so each is
+  graded against the rubric, not against the other answer.
+- **No skip.** Unsure answers are the most informative ones, and skipping them inflates
+  agreement. `?` flags an answer as unsure, and you still choose pass or fail.
+- **Same view as the judge.** The card shows only what the judge will get: rubric, prompt and
+  raw answer.
+- **Labels are pinned to answers.** If `candidates.jsonl` is regenerated, any label given to a
+  different answer is a load error, never silently carried over.
+- **Pass/fail, not 1–5.** The scorer's result is pass or fail, and binary calls are faster and
+  more consistent. judge-check compares the judge's `score >= pass_at` with the label.
+
+---
+
 ## 10. Repo layout
 
 ```
@@ -294,7 +350,9 @@ grady/
 ├── BUILD_LOG.md            # how the agents built it and what review caught
 ├── pyproject.toml
 ├── src/grady/
-│   ├── cli.py              # run, report, compare, judge-check
+│   ├── cli.py              # run, label, report, compare, judge-check
+│   ├── labeling.py         # candidate + label files, grading order, the label loop
+│   ├── judgeset.py         # python -m grady.judgeset: answers for the judge-check set
 │   ├── config.py           # suite + model schemas (Pydantic), loaders
 │   ├── client.py           # OpenAI-compatible async client, retries, timing
 │   ├── runner.py           # concurrency, repeats, result writing
@@ -315,7 +373,9 @@ grady/
 │   ├── models.local.yaml      # Ollama / vLLM / MLX / LM Studio / hosted examples
 │   └── schemas/               # M2
 ├── judge-check/
-│   └── labeled.jsonl          # M4: ~20 answers graded by hand
+│   ├── cases.yaml             # rubric prompts
+│   ├── candidates.jsonl       # answers from two models, written by grady.judgeset
+│   └── labeled.jsonl          # the same answers graded by hand with grady label
 ├── tests/
 │   ├── conftest.py
 │   ├── fake_server.py
@@ -344,8 +404,9 @@ grady/
 - **M2, judge settings:** temperature 0, a fixed prompt template, and verdicts returned as JSON
   `{"score": 1-5, "reason": "..."}`. An unparseable verdict is a scorer failure with the raw
   text in `detail`, never a silent pass.
-- **M4, judge-check:** the ~20 labels are graded by hand **before** the judge scorer is tuned.
-  Report raw agreement and Cohen's kappa.
+- **M4, judge-check:** the labels are graded by hand **before** the judge scorer is tuned.
+  Report raw agreement and Cohen's kappa, list each disagreement with the judge's reason, and
+  report agreement on `unsure` labels separately.
 
 ---
 
