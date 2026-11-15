@@ -14,7 +14,16 @@ classifiers = [
   "Intended Audience :: Developers",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-dependencies = []
+dependencies = [
+    "httpx>=0.28.1",
+    "pydantic>=2.14.3",
+    "pyyaml>=6.0.3",
+    "rich>=15.0.0",
+    "typer>=0.29.1",
+]
+
+[project.scripts]
+grady = "grady.cli:app"
 
 [dependency-groups]
 dev = [
@@ -22,6 +31,7 @@ dev = [
   "ruff>=0.17",
   "mypy>=2.4",
   "pre-commit>=4.7",
+  "types-pyyaml>=6.0.12.20261113",
 ]
 
 [build-system]
@@ -45,6 +55,7 @@ strict = true
 packages = ["grady"]
 mypy_path = "src"
 warn_unreachable = true
+plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

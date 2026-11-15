@@ -179,6 +179,7 @@ grady run SUITE --models MODELS_FILE
           [--timeout 60]              # seconds per request
           [--retries 3]               # retries after the first attempt
           [--min-pass-rate 0.0]       # 0.0-1.0; below this, exit 1
+          [--warmup | --no-warmup]    # default on: one untimed request per model first
 ```
 
 **Exit codes**
@@ -202,6 +203,13 @@ grady judge-check [judge-check/labeled.jsonl] --models FILE --judge LABEL
 
 ## 8. Runner behavior
 
+- **Warm-up** (default on): before any timed job, Grady sends each selected model one tiny
+  request (`"Reply with OK."`, `max_tokens: 1`), one model at a time, so a cold local server
+  loads the model before timing starts. Warm-ups are never scored or written to the results
+  file. Their latency, attempts and any error go in `.meta.json` and are printed to stderr.
+  A failed warm-up is a warning, not a stop: the jobs still run and each records its own
+  error, and the exit code follows from the jobs alone. `--no-warmup` skips it, for example
+  to measure cold-start latency on purpose.
 - Jobs are `cases × selected models × repeats` (repeats is 1 until M2). They run under one
   `asyncio.Semaphore(concurrency)` sharing one `httpx.AsyncClient`.
 - **Retries:** on HTTP 408, 429, 500, 502, 503, 504 and on transport errors (connection
@@ -227,6 +235,14 @@ grady judge-check [judge-check/labeled.jsonl] --models FILE --judge LABEL
 - `tokens_per_s` is `completion_tokens / latency_s`. It is **end-to-end throughput**, prompt
   processing included, not pure decode speed. It is null when the server reports no `usage`.
   Streaming and time-to-first-token are out of scope for v1.
+- Both numbers include time a request spends **queued on the server** when `--concurrency`
+  exceeds what the server runs in parallel. For answers of a few tokens, `tokens_per_s` says
+  little. Reports (M3) must label these as end-to-end figures.
+- **Model load time** is kept out of job timings by the warm-up. The first real M1 run, before
+  warm-up existed, showed why: gemma3:4b on a cold Ollama measured 4–5 s for the first
+  requests against about 1 s warm. With warm-up, the 3.3 s load shows up in `.meta.json`
+  instead, and job latencies match a warm run. If a server can't hold every selected model at
+  once, a later swap still lands in job latency.
 
 ---
 
@@ -262,9 +278,10 @@ completion order. Readers sort by `(model, case_id, repeat)` if they need a stab
 
 Written when the run starts and rewritten with totals when it ends: `grady_version`, `run_id`,
 `suite`, `suite_path`, `suite_sha256`, `models` (label, base_url, model; never keys),
-`settings` (concurrency, timeout, retries, min_pass_rate), `git_sha` (of the working
-directory, if it is a git repo), `started_at`, `finished_at`, and `totals` (jobs, passed,
-failed, errors, pass_rate).
+`settings` (concurrency, timeout, retries, min_pass_rate, warmup), `git_sha` (of the
+working directory, if it is a git repo), `started_at`, `warmup` (one entry per model: label,
+latency_s, attempts, error), `finished_at`, and `totals` (jobs, passed, failed, errors,
+pass_rate).
 
 ---
 
